@@ -12,30 +12,20 @@ app.use(express.json())
 const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_KEY })
 
 const server = http.createServer(app)
-const io = new Server(server, {
-  cors: { origin: '*' }
-})
+const io = new Server(server, { cors: { origin: '*' } })
+
+const PLANES = {
+  basico:  { nombre: 'Moreno Order — Plan Básico',   precio: 1299 },
+  pro:     { nombre: 'Moreno Order — Plan Pro',       precio: 1799 },
+  premium: { nombre: 'Moreno Order — Plan Premium',   precio: 2499 },
+}
 
 io.on('connection', (socket) => {
   console.log('Cliente conectado:', socket.id)
-
-  socket.on('nueva_orden', (orden) => {
-    console.log('Nueva orden:', orden)
-    io.emit('orden_recibida', orden)
-  })
-
-  socket.on('actualizar_estado', (data) => {
-    console.log('Estado actualizado:', data)
-    io.emit('estado_actualizado', data)
-  })
-
-  socket.on('mesa_actualizada', (mesa) => {
-    io.emit('mesa_actualizada', mesa)
-  })
-
-  socket.on('disconnect', () => {
-    console.log('Cliente desconectado:', socket.id)
-  })
+  socket.on('nueva_orden', (orden) => { io.emit('orden_recibida', orden) })
+  socket.on('actualizar_estado', (data) => { io.emit('estado_actualizado', data) })
+  socket.on('mesa_actualizada', (mesa) => { io.emit('mesa_actualizada', mesa) })
+  socket.on('disconnect', () => { console.log('Cliente desconectado:', socket.id) })
 })
 
 app.post('/chat', async (req, res) => {
@@ -44,8 +34,7 @@ app.post('/chat', async (req, res) => {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 1024,
-      system: `Eres el asistente amigable del restaurante La Hacienda en Guadalajara. 
-Tu trabajo es ayudar a los clientes a elegir platillos del menú.
+      system: `Eres el asistente amigable del restaurante. 
 El menú disponible es: ${JSON.stringify(menu)}.
 Responde siempre en español, de forma breve y amigable (máximo 3 líneas).
 Si te preguntan por recomendaciones, sugiere platillos del menú.
@@ -59,12 +48,16 @@ No inventes platillos que no están en el menú.`,
   }
 })
 
-// ── Ruta segura para crear preferencia de MercadoPago ──────────────────────
 app.post('/crear-preferencia', async (req, res) => {
-  const { restaurante_id, back_url } = req.body
+  const { restaurante_id, back_url, plan } = req.body
 
-  if (!restaurante_id || !back_url) {
+  if (!restaurante_id || !back_url || !plan) {
     return res.status(400).json({ error: 'Faltan datos' })
+  }
+
+  const planInfo = PLANES[plan]
+  if (!planInfo) {
+    return res.status(400).json({ error: 'Plan inválido' })
   }
 
   try {
@@ -76,9 +69,9 @@ app.post('/crear-preferencia', async (req, res) => {
       },
       body: JSON.stringify({
         items: [{
-          title: 'Moreno Order — Mensualidad',
+          title: planInfo.nombre,
           quantity: 1,
-          unit_price: 1200,
+          unit_price: planInfo.precio,
           currency_id: 'MXN',
         }],
         back_urls: {
@@ -87,12 +80,11 @@ app.post('/crear-preferencia', async (req, res) => {
           pending: back_url,
         },
         auto_return: 'approved',
-        metadata: { restaurante_id },
+        metadata: { restaurante_id, plan },
       }),
     })
 
     const data = await response.json()
-
     if (data.init_point) {
       res.json({ init_point: data.init_point })
     } else {
