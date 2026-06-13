@@ -97,6 +97,40 @@ app.post('/crear-preferencia', async (req, res) => {
   }
 })
 
+app.post('/crear-preferencia', async (req, res) => {
+  const { titulo, precio, restaurante_id, slug } = req.body
+
+  try {
+    const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`
+      },
+      body: JSON.stringify({
+        items: [{
+          title: `Order Moreno - Plan ${titulo}`,
+          quantity: 1,
+          unit_price: Number(precio),
+          currency_id: 'MXN'
+        }],
+        back_urls: {
+          success: `https://project-aok5h.vercel.app/?pago=exito&restaurante=${restaurante_id}&slug=${slug}`,
+          failure: `https://project-aok5h.vercel.app/?pago=fallo`,
+          pending: `https://project-aok5h.vercel.app/?pago=pendiente`
+        },
+        auto_return: 'approved'
+      })
+    })
+
+    const data = await response.json()
+    res.json({ init_point: data.init_point })
+  } catch (error) {
+    console.error('Error MP:', error)
+    res.status(500).json({ error: 'Error al crear preferencia de pago' })
+  }
+})
+
 server.listen(3001, () => {
   console.log('Servidor corriendo en puerto 3001')
 })
