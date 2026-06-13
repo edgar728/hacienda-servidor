@@ -124,6 +124,7 @@ app.post('/crear-preferencia', async (req, res) => {
     })
 
     const data = await response.json()
+    console.log('Respuesta MP:', JSON.stringify(data))
     res.json({ init_point: data.init_point })
   } catch (error) {
     console.error('Error MP:', error)
