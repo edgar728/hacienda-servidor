@@ -4,12 +4,19 @@ const http = require('http')
 const { Server } = require('socket.io')
 const cors = require('cors')
 const Anthropic = require('@anthropic-ai/sdk')
+const bcrypt = require('bcryptjs')
+const { createClient } = require('@supabase/supabase-js')
 
 const app = express()
 app.use(cors())
 app.use(express.json())
 
 const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_KEY })
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+)
 
 const server = http.createServer(app)
 const io = new Server(server, { cors: { origin: '*' } })
@@ -24,7 +31,6 @@ const PLANES = {
 io.on('connection', (socket) => {
   console.log('Cliente conectado:', socket.id)
 
-  // El cliente se une a la sala de su restaurante
   socket.on('unirse', (restaurante_id) => {
     if (restaurante_id) {
       socket.join(`rest_${restaurante_id}`)
@@ -32,18 +38,15 @@ io.on('connection', (socket) => {
     }
   })
 
-  // Nueva orden — solo al restaurante correspondiente
   socket.on('nueva_orden', (orden) => {
     console.log('Nueva orden:', orden.id, 'restaurante:', orden.restaurante_id)
     if (orden.restaurante_id) {
       io.to(`rest_${orden.restaurante_id}`).emit('orden_recibida', orden)
     } else {
-      // Fallback por slug
       io.emit('orden_recibida', orden)
     }
   })
 
-  // Actualizar estado — solo al restaurante correspondiente
   socket.on('actualizar_estado', (data) => {
     console.log('Estado actualizado:', data)
     if (data.restaurante_id) {
@@ -53,7 +56,6 @@ io.on('connection', (socket) => {
     }
   })
 
-  // Mesa actualizada — solo al restaurante correspondiente
   socket.on('mesa_actualizada', (mesa) => {
     if (mesa.restaurante_id) {
       io.to(`rest_${mesa.restaurante_id}`).emit('mesa_actualizada', mesa)
@@ -120,6 +122,87 @@ app.post('/crear-preferencia', async (req, res) => {
   } catch (error) {
     console.error('Error:', error)
     res.status(500).json({ error: 'Error de conexión con MercadoPago' })
+  }
+})
+
+// ════════════════════════════════════════════════════════════
+// AUTENTICACIÓN SEGURA CON BCRYPT
+// ════════════════════════════════════════════════════════════
+
+// Login: recibe email + password en texto plano, compara contra el hash guardado
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Faltan datos' })
+  }
+
+  try {
+    const { data: usuario, error } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('email', email.toLowerCase().trim())
+      .single()
+
+    if (error || !usuario) {
+      return res.status(401).json({ error: 'Email o contraseña incorrectos' })
+    }
+
+    const passwordCorrecta = await bcrypt.compare(password, usuario.password)
+    if (!passwordCorrecta) {
+      return res.status(401).json({ error: 'Email o contraseña incorrectos' })
+    }
+
+    // No regresar el hash al frontend
+    const { password: _, ...usuarioSinPassword } = usuario
+    res.json({ usuario: usuarioSinPassword })
+  } catch (e) {
+    console.error('Error login:', e)
+    res.status(500).json({ error: 'Error al iniciar sesión' })
+  }
+})
+
+// Generar hash — usado al crear usuarios nuevos desde el registro o admin
+app.post('/hash-password', async (req, res) => {
+  const { password } = req.body
+  if (!password) return res.status(400).json({ error: 'Falta password' })
+  try {
+    const hash = await bcrypt.hash(password, 10)
+    res.json({ hash })
+  } catch (e) {
+    res.status(500).json({ error: 'Error al generar hash' })
+  }
+})
+
+// Cambiar contraseña — verifica la actual y guarda el hash de la nueva
+app.post('/cambiar-password', async (req, res) => {
+  const { usuario_id, password_actual, password_nueva } = req.body
+  if (!usuario_id || !password_actual || !password_nueva) {
+    return res.status(400).json({ error: 'Faltan datos' })
+  }
+
+  try {
+    const { data: usuario, error } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('id', usuario_id)
+      .single()
+
+    if (error || !usuario) {
+      return res.status(404).json({ error: 'Usuario no encontrado' })
+    }
+
+    const passwordCorrecta = await bcrypt.compare(password_actual, usuario.password)
+    if (!passwordCorrecta) {
+      return res.status(401).json({ error: 'La contraseña actual es incorrecta' })
+    }
+
+    const nuevoHash = await bcrypt.hash(password_nueva, 10)
+    await supabase.from('usuarios').update({ password: nuevoHash }).eq('id', usuario_id)
+
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('Error cambiar password:', e)
+    res.status(500).json({ error: 'Error al cambiar contraseña' })
   }
 })
 
