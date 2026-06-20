@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from './supabase'
 import Logo from './Logo'
+
+const SERVIDOR = 'https://hacienda-servidor-production.up.railway.app'
 
 const C = {
   bg: '#0A0A0A',
@@ -27,50 +28,57 @@ export default function Login() {
     setCargando(true)
     setError('')
 
-    const { data: usuario } = await supabase
-      .from('usuarios')
-      .select('*')
-      .eq('email', email.toLowerCase().trim())
-      .eq('password', password)
-      .single()
+    try {
+      const resp = await fetch(`${SERVIDOR}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.toLowerCase().trim(), password })
+      })
 
-    if (!usuario) {
-      setCargando(false)
-      setError('Email o contraseña incorrectos')
-      return
-    }
+      const data = await resp.json()
 
-    const { data: restaurante } = await supabase
-      .from('restaurantes')
-      .select('activo, suscripcion_activa, suscripcion_expira')
-      .eq('slug', usuario.slug)
-      .single()
-
-    setCargando(false)
-
-    if (restaurante) {
-      const suscripcionVencida =
-        !restaurante.suscripcion_activa ||
-        !restaurante.suscripcion_expira ||
-        new Date(restaurante.suscripcion_expira) < new Date()
-
-      if (suscripcionVencida && usuario.rol !== 'dashboard') {
-  setError('Tu suscripción ha vencido. Contacta a soporte para renovar.')
-  return
-}
-      if (!restaurante.activo) {
-        setError('Tu cuenta está suspendida. Contacta a soporte.')
+      if (!resp.ok) {
+        setCargando(false)
+        setError(data.error || 'Email o contraseña incorrectos')
         return
       }
+
+      const usuario = data.usuario
+
+      // Verificar estado de la suscripción del restaurante
+      const respRest = await fetch(`${SERVIDOR}/restaurante-estado/${usuario.slug}`)
+      const restaurante = await respRest.json()
+
+      setCargando(false)
+
+      if (restaurante && !restaurante.error) {
+        const suscripcionVencida =
+          !restaurante.suscripcion_activa ||
+          !restaurante.suscripcion_expira ||
+          new Date(restaurante.suscripcion_expira) < new Date()
+
+        if (suscripcionVencida && usuario.rol !== 'dashboard') {
+          setError('Tu suscripción ha vencido. Contacta a soporte para renovar.')
+          return
+        }
+        if (!restaurante.activo) {
+          setError('Tu cuenta está suspendida. Contacta a soporte.')
+          return
+        }
+      }
+
+      sessionStorage.setItem('orderia_user', JSON.stringify(usuario))
+
+      if (usuario.rol === 'cocina') navigate(`/r/${usuario.slug}/cocina`)
+      else if (usuario.rol === 'mesero') navigate(`/r/${usuario.slug}/mesero`)
+      else if (usuario.rol === 'mesas') navigate(`/r/${usuario.slug}/mesas`)
+      else if (usuario.rol === 'dashboard') navigate(`/r/${usuario.slug}/dashboard`)
+      else navigate('/')
+    } catch (e) {
+      console.error(e)
+      setCargando(false)
+      setError('Error de conexión. Intenta de nuevo.')
     }
-
-    sessionStorage.setItem('orderia_user', JSON.stringify(usuario))
-
-    if (usuario.rol === 'cocina') navigate(`/r/${usuario.slug}/cocina`)
-    else if (usuario.rol === 'mesero') navigate(`/r/${usuario.slug}/mesero`)
-    else if (usuario.rol === 'mesas') navigate(`/r/${usuario.slug}/mesas`)
-    else if (usuario.rol === 'dashboard') navigate(`/r/${usuario.slug}/dashboard`)
-    else navigate('/')
   }
 
   return (
@@ -82,7 +90,7 @@ export default function Login() {
             <Logo size={72} />
           </div>
           <div style={{ fontSize: '24px', fontWeight: '700', color: C.text, letterSpacing: '0.5px' }}>
-            Order Moreno
+            Moreno Order
           </div>
           <div style={{ fontSize: '11px', color: C.gold, marginTop: '6px', letterSpacing: '3px', textTransform: 'uppercase' }}>
             Moreno Technology

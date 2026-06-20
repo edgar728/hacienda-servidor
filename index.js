@@ -206,6 +206,24 @@ app.post('/cambiar-password', async (req, res) => {
   }
 })
 
+// Consultar estado del restaurante (activo, suscripción) — usado en login
+app.get('/restaurante-estado/:slug', async (req, res) => {
+  try {
+    const { data: restaurante, error } = await supabase
+      .from('restaurantes')
+      .select('activo, suscripcion_activa, suscripcion_expira')
+      .eq('slug', req.params.slug)
+      .single()
+
+    if (error || !restaurante) {
+      return res.status(404).json({ error: 'Restaurante no encontrado' })
+    }
+    res.json(restaurante)
+  } catch (e) {
+    res.status(500).json({ error: 'Error al consultar restaurante' })
+  }
+})
+
 server.listen(3001, () => {
   console.log('Servidor corriendo en puerto 3001')
 })
