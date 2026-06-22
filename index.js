@@ -14,7 +14,7 @@ app.use(express.json())
 const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_KEY })
 
 const supabase = createClient(
-  process.env.SUPABASE_URL,
+  process.env.SUPABASE_URL || 'https://xcdvwkkneettlfweyfjj.supabase.co',
   process.env.SUPABASE_SERVICE_KEY
 )
 
